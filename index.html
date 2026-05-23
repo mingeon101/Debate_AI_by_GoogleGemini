@@ -1,0 +1,231 @@
+import { useState } from "react";
+
+const EXAMPLES = ["사형제도를 폐지해야 한다", "AI가 인간의 일자리를 빼앗는다", "동물실험을 금지해야 한다", "대학입시 수능을 폐지해야 한다"];
+
+const PROMPT_TEMPLATE = (topic) => `당신은 토론 입론서 전문 작성가입니다.
+아래 토론 주제에 대해 찬성 측과 반대 측 입론서를 각각 4개의 논거를 포함하여 작성하세요.
+
+토론 주제: ${topic}
+
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트, 마크다운 백틱은 절대 포함하지 마세요.
+
+{
+  "topic": "주제 문장",
+  "pro": {
+    "stance": "찬성 측 핵심 입장 (2~3문장)",
+    "arguments": [
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" }
+    ],
+    "conclusion": "최종 주장 (2~3문장)"
+  },
+  "con": {
+    "stance": "반대 측 핵심 입장 (2~3문장)",
+    "arguments": [
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" },
+      { "title": "논거 제목", "body": "상세 설명 (3~4문장)", "evidence": "근거/사례/통계" }
+    ],
+    "conclusion": "최종 주장 (2~3문장)"
+  }
+}`;
+
+const C = {
+  pro: { main: "#C0392B", light: "#fdf0ef", mid: "#e8b4b0", text: "#7b1a13" },
+  con: { main: "#1A5276", light: "#edf3fb", mid: "#a9c4df", text: "#0d2f45" },
+};
+
+function SideCard({ side, data }) {
+  const c = side === "pro" ? C.pro : C.con;
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, borderTop: `4px solid ${c.main}`, border: `1px solid ${c.mid}`, borderTopWidth: 4, padding: "28px 26px 24px", boxShadow: "0 2px 20px rgba(0,0,0,0.06)" }}>
+      <div style={{ display: "inline-block", background: c.main, color: "#fff", fontSize: 11, letterSpacing: 3, fontWeight: 700, padding: "5px 14px", borderRadius: 3, marginBottom: 14 }}>
+        {side === "pro" ? "✦ 찬  성" : "✦ 반  대"}
+      </div>
+      <p style={{ fontSize: 13.5, lineHeight: 1.85, color: "#444", marginBottom: 16 }}>{data.stance}</p>
+      <div style={{ height: 1, background: `linear-gradient(to right, ${c.mid}, transparent)`, marginBottom: 22 }} />
+
+      {data.arguments.map((arg, i) => (
+        <div key={i} style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, fontWeight: 700, color: c.main, marginBottom: 4 }}>논거 0{i + 1}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: c.text, borderLeft: `3px solid ${c.main}`, paddingLeft: 10, marginBottom: 8, lineHeight: 1.4, fontFamily: "Georgia, serif" }}>{arg.title}</div>
+          <p style={{ fontSize: 13, lineHeight: 1.9, color: "#444" }}>{arg.body}</p>
+          {arg.evidence && (
+            <div style={{ marginTop: 10, padding: "10px 14px", background: c.light, borderLeft: `3px solid ${c.mid}`, borderRadius: "0 6px 6px 0", fontSize: 12.5, color: "#555", lineHeight: 1.7, display: "flex", gap: 8 }}>
+              <span style={{ flexShrink: 0 }}>📌</span><span>{arg.evidence}</span>
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{ marginTop: 8, padding: "16px 18px", background: c.light, borderRadius: 8, border: `1px solid ${c.mid}` }}>
+        <div style={{ fontSize: 10, letterSpacing: 2, fontWeight: 700, color: c.main, marginBottom: 8 }}>📢 최종 주장</div>
+        <p style={{ fontSize: 13.5, lineHeight: 1.8, fontFamily: "Georgia, serif", fontWeight: 600, color: "#222" }}>{data.conclusion}</p>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [apiKey, setApiKey] = useState("");
+  const [topic, setTopic] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("both");
+  const [dots, setDots] = useState(0);
+  const [showKey, setShowKey] = useState(false);
+
+  async function generate() {
+    if (!apiKey.trim()) { setError("Gemini API 키를 입력해 주세요."); return; }
+    if (!topic.trim()) { setError("토론 주제를 입력해 주세요."); return; }
+    setLoading(true); setResult(null); setError("");
+    const iv = setInterval(() => setDots(d => (d + 1) % 4), 400);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: PROMPT_TEMPLATE(topic) }] }],
+            generationConfig: { maxOutputTokens: 3000, temperature: 0.7 },
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const clean = raw.replace(/```json|```/g, "").trim();
+      setResult(JSON.parse(clean));
+      setTab("both");
+    } catch (e) {
+      setError("오류: " + (e.message || "다시 시도해 주세요. API 키를 확인하세요."));
+    } finally {
+      clearInterval(iv); setLoading(false);
+    }
+  }
+
+  const inp = { flex: 1, padding: "13px 16px", fontSize: 14, fontFamily: "inherit", border: "2px solid #e0dbd0", borderRadius: 8, background: "#fdfcf9", color: "#1a1a2e", outline: "none" };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f9f7f2", fontFamily: "'Noto Sans KR', sans-serif", color: "#1a1a2e" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        @keyframes spin { to { transform: rotate(360deg); } }
+        input:focus { border-color: #12121e !important; box-shadow: 0 0 0 3px rgba(18,18,30,0.08); }
+        button:not(:disabled):hover { opacity: 0.85; }
+      `}</style>
+
+      {/* Header */}
+      <header style={{ background: "#12121e", padding: "44px 24px 36px", textAlign: "center" }}>
+        <div style={{ fontSize: 30, marginBottom: 10, filter: "drop-shadow(0 0 12px rgba(66,133,244,0.5))" }}>⚖</div>
+        <div style={{ fontFamily: "Georgia, serif", fontSize: 30, fontWeight: 700, background: "linear-gradient(135deg, #4285F4, #34A853, #FBBC05, #EA4335)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", letterSpacing: 2, marginBottom: 8 }}>
+          DebateForge
+        </div>
+        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, letterSpacing: 0.5 }}>Powered by Google Gemini · 찬반 입론서 자동 생성</p>
+      </header>
+
+      {/* Input */}
+      <section style={{ padding: "32px 24px 0", position: "relative", zIndex: 1 }}>
+        <div style={{ maxWidth: 760, margin: "0 auto", background: "#fff", borderRadius: 12, padding: "28px 30px", boxShadow: "0 4px 32px rgba(0,0,0,0.08)", border: "1px solid #e8e4da" }}>
+
+          {/* API Key */}
+          <label style={{ display: "block", fontSize: 11, letterSpacing: 2, fontWeight: 700, color: "#999", marginBottom: 10 }}>GEMINI API KEY</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+            <input
+              style={{ ...inp, fontFamily: "monospace", fontSize: 13 }}
+              type={showKey ? "text" : "password"}
+              placeholder="AIzaSy... (Google AI Studio에서 발급)"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              disabled={loading}
+            />
+            <button onClick={() => setShowKey(s => !s)} style={{ padding: "13px 14px", border: "2px solid #e0dbd0", borderRadius: 8, background: "#f5f3ee", cursor: "pointer", fontSize: 14 }}>
+              {showKey ? "🙈" : "👁"}
+            </button>
+          </div>
+
+          {/* Topic */}
+          <label style={{ display: "block", fontSize: 11, letterSpacing: 2, fontWeight: 700, color: "#999", marginBottom: 10 }}>토론 주제</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input
+              style={inp}
+              placeholder="예: 사형제도를 폐지해야 한다"
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && generate()}
+              disabled={loading}
+            />
+            <button
+              onClick={generate}
+              disabled={loading || !topic.trim() || !apiKey.trim()}
+              style={{ padding: "13px 22px", background: loading ? "#aaa" : "#12121e", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+            >
+              {loading ? `생성 중${".".repeat(dots)}` : "생성하기"}
+            </button>
+          </div>
+
+          {/* Chips */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "#ccc", letterSpacing: 1 }}>예시</span>
+            {EXAMPLES.map(ex => (
+              <button key={ex} onClick={() => setTopic(ex)} disabled={loading}
+                style={{ padding: "5px 12px", borderRadius: 20, border: "1px solid #ddd", background: "#f5f3ee", fontSize: 12, color: "#555", cursor: "pointer", fontFamily: "inherit" }}>
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Error */}
+      {error && (
+        <div style={{ maxWidth: 760, margin: "16px auto", padding: "14px 20px", background: "#fff0ef", border: "1px solid #f5b4b0", borderRadius: 8, color: "#c0392b", fontSize: 13, textAlign: "center" }}>
+          {error}
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: "60px 24px" }}>
+          <div style={{ width: 40, height: 40, margin: "0 auto 20px", border: "3px solid #e0dbd0", borderTop: "3px solid #4285F4", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <p style={{ fontSize: 15, fontWeight: 600, color: "#333" }}>Gemini가 찬반 논거를 분석 중…</p>
+          <p style={{ fontSize: 13, color: "#999", marginTop: 6 }}>양측의 주장을 균형 있게 구성하고 있습니다</p>
+        </div>
+      )}
+
+      {/* Result */}
+      {result && (
+        <section style={{ maxWidth: 1240, margin: "32px auto", padding: "0 24px 60px" }}>
+          <div style={{ textAlign: "center", marginBottom: 28, padding: "22px", background: "#12121e", borderRadius: 10 }}>
+            <span style={{ fontSize: 11, letterSpacing: 3, color: "#FBBC05", fontWeight: 700, display: "block", marginBottom: 8 }}>토론 주제</span>
+            <h2 style={{ fontSize: "clamp(15px, 2.5vw, 23px)", color: "#fff", fontFamily: "Georgia, serif", fontWeight: 700 }}>"{result.topic}"</h2>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 24 }}>
+            {[["both","찬반 전체"], ["pro","찬성"], ["con","반대"]].map(([key, label]) => (
+              <button key={key} onClick={() => setTab(key)}
+                style={{ padding: "9px 24px", borderRadius: 6, border: `1.5px solid ${tab === key ? (key === "pro" ? C.pro.main : key === "con" ? C.con.main : "#12121e") : "#ddd"}`, background: tab === key ? (key === "pro" ? C.pro.main : key === "con" ? C.con.main : "#12121e") : "#fff", color: tab === key ? "#fff" : "#666", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: tab === "both" ? "1fr 1fr" : "1fr", gap: 20 }}>
+            {(tab === "both" || tab === "pro") && <SideCard side="pro" data={result.pro} />}
+            {(tab === "both" || tab === "con") && <SideCard side="con" data={result.con} />}
+          </div>
+        </section>
+      )}
+
+      <footer style={{ textAlign: "center", padding: "24px", borderTop: "1px solid #e0dbd0", fontSize: 11, color: "#ccc", letterSpacing: 0.5 }}>
+        AI가 생성한 입론서는 교육·토론 연습 목적으로 활용하세요 · DebateForge powered by Google Gemini
+      </footer>
+    </div>
+  );
+}
